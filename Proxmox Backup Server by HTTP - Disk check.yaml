@@ -1,0 +1,303 @@
+zabbix_export:
+  version: '6.0'
+  date: '2025-05-23T12:17:28Z'
+  groups:
+    - uuid: 846977d1dfed4968bc5f8bdb363285bc
+      name: 'Templates/Operating systems'
+  templates:
+    - uuid: 46f5d184de634a45a651c1d674fc9faf
+      template: '0_CST_TPL-Proxmox Backup Server by HTTP - Disk check'
+      name: '0_CST_TPL-Proxmox Backup Server by HTTP - Disk check'
+      description: |
+        Create new user "zabbix" in Configuration -> Access Control - User Management
+        
+        Issue new token "zabbix" for user "zabbix@xxx" in Configuraion -> Access Control -> API Token
+        
+        Add User e API Token permission for the user "zabbix with "/" and Role Audit in Configuraion -> Access Control -> Permissions
+        The templates want /datastore, /system/status and /system/tasks in (Please note that the user on whose behalf the token is issued must have the appropriate rights) but isn't possibile to create a custom group in PBS
+        
+        Attach new template Proxmox Backup Server by HTTP to host
+        Configure macros:
+        {$PBS.NODE.NAME}
+        {$PBS.TOKEN.ID}
+        {$PBS.TOKEN.SECRET}
+      groups:
+        - name: 'Templates/Operating systems'
+      items:
+        - uuid: 4b7466b67bea4d1ebaa1e495955a98f1
+          name: 'Proxmox: Smart Api Error'
+          type: DEPENDENT
+          key: proxmox.smart.api.errors
+          delay: '0'
+          trends: '0'
+          value_type: TEXT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.APIError
+          master_item:
+            key: proxmox.smart.data
+          triggers:
+            - uuid: e7f11fd560714636ad1516f636ea4135
+              expression: 'find(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.api.errors,,"regexp","Ok")=0'
+              name: 'Proxmox: Smart API error'
+              priority: HIGH
+        - uuid: 2265ad90c2c7445dba5f18dd021d3ac2
+          name: 'Proxmox: Get Smart Data'
+          type: SCRIPT
+          key: proxmox.smart.data
+          delay: 1h
+          trends: '0'
+          value_type: TEXT
+          params: |
+            var SmartData = {
+                APIError: "Ok"
+            };
+            
+            var params = JSON.parse(value);
+            var req = new HttpRequest();
+            req.addHeader('Authorization: PBSAPIToken=' + params.token + ':' + params.secret);
+            
+            var smartResult;
+            
+            try {
+                fullUrl = 'https://' + params.url + ':' + params.port + '/api2/json/nodes/' + params.hostname + '/disks/list';
+                smartResult = retryRequest(fullUrl,params.retry,params.retryms);
+            } catch (error) {
+                SmartData.APIError = "Proxmox API failed. Error: " + error + " (URL: " + fullUrl + ")";
+                return JSON.stringify(SmartData);
+            }
+            
+            try {
+                var data = JSON.parse(smartResult).data;
+            } catch (error) {
+                SmartData.APIError = "Proxmox API failed. Error: " + error;
+                return JSON.stringify(SmartData);
+            }
+            
+            var result = {
+                APIError: "Ok",
+                data: data
+            };
+            
+            return JSON.stringify(result);
+            
+            function retryRequest(url, retries, delay) {
+                while (retries >= 0) {
+                    try {
+                        return req.get(encodeURI(url));
+                    } catch (error) {
+                        if (retries === 0) {
+                            throw error;
+                        }
+                        retries--;
+            
+                        var start = Date.now();
+                        while (Date.now() - start < delay) {
+                            // Empty cycle. Waiting
+                        }
+                    }
+                }
+            }
+          timeout: 30s
+          parameters:
+            - name: hostname
+              value: '{$PBS.NODE.NAME}'
+            - name: port
+              value: '{$PBS.URL.PORT}'
+            - name: retry
+              value: '{$PROXMOX.REQ.RETRY}'
+            - name: retryms
+              value: '{$PROXMOX.REQ.RETRY.MS}'
+            - name: secret
+              value: '{$PBS.TOKEN.SECRET}'
+            - name: token
+              value: '{$PBS.TOKEN.ID}'
+            - name: url
+              value: '{HOST.CONN}'
+          tags:
+            - tag: component
+              value: system
+      discovery_rules:
+        - uuid: 7aae28233d6c4731b2bada5a7b9c67f0
+          name: 'Smart discovery'
+          type: DEPENDENT
+          key: proxmox.smart.discovery
+          delay: '0'
+          item_prototypes:
+            - uuid: 7e4beae6c94142f28c1a23d679597408
+              name: 'Proxmox: Smart [{#SMART.DEVPATH}]: Disk Type'
+              type: DEPENDENT
+              key: 'proxmox.smart.disktype[{#SMART.DEVPATH}]'
+              delay: '0'
+              trends: '0'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data[?(@.devpath == "{#SMART.DEVPATH}")].["disk-type"].first()'
+              master_item:
+                key: proxmox.smart.data
+            - uuid: d33c591b9c4940dcb44c6e8c727ede35
+              name: 'Proxmox: Smart [{#SMART.DEVPATH}]: Model'
+              type: DEPENDENT
+              key: 'proxmox.smart.model[{#SMART.DEVPATH}]'
+              delay: '0'
+              trends: '0'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data[?(@.devpath == "{#SMART.DEVPATH}")].model.first()'
+              master_item:
+                key: proxmox.smart.data
+            - uuid: 28954a075087427d81e3f9a6608a1f1e
+              name: 'Proxmox: Smart [{#SMART.DEVPATH}]: Name'
+              type: DEPENDENT
+              key: 'proxmox.smart.name[{#SMART.DEVPATH}]'
+              delay: '0'
+              trends: '0'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data[?(@.devpath == "{#SMART.DEVPATH}")].name.first()'
+              master_item:
+                key: proxmox.smart.data
+            - uuid: 282efc82e1ce437dab7a7764de612a16
+              name: 'Proxmox: Smart [{#SMART.DEVPATH}]: Size'
+              type: DEPENDENT
+              key: 'proxmox.smart.size[{#SMART.DEVPATH}]'
+              delay: '0'
+              units: G
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data[?(@.devpath == "{#SMART.DEVPATH}")].size.first()'
+              master_item:
+                key: proxmox.smart.data
+            - uuid: 19e72e7e56f74d70866e9c80a19111a3
+              name: 'Proxmox: Smart [{#SMART.DEVPATH}]: Serial Number'
+              type: DEPENDENT
+              key: 'proxmox.smart.sn[{#SMART.DEVPATH}]'
+              delay: '0'
+              trends: '0'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data[?(@.devpath == "{#SMART.DEVPATH}")].serial.first()'
+              master_item:
+                key: proxmox.smart.data
+            - uuid: eb5721b6052e47088ea2e6eeebcff996
+              name: 'Proxmox: Smart [{#SMART.DEVPATH}]: Status'
+              type: DEPENDENT
+              key: 'proxmox.smart.status[{#SMART.DEVPATH}]'
+              delay: '0'
+              trends: '0'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data[?(@.devpath == "{#SMART.DEVPATH}")].status.first()'
+              master_item:
+                key: proxmox.smart.data
+              trigger_prototypes:
+                - uuid: b74b1adcab0a469ebfa69693efcff071
+                  expression: |
+                    find(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],,"iregexp","ok")=0 and
+                    find(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],,"iregexp","passed")=0 and
+                    find(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],,"iregexp","unknown")=0
+                  name: 'Proxmox: Smart [{#SMART.DEVPATH}] Status ({ITEM.LASTVALUE})'
+                  priority: DISASTER
+                - uuid: c776a60365e4449891f70b82b6f6129e
+                  expression: 'nodata(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],{$PROXMOX_NODATA01})=1'
+                  name: 'Proxmox: Smart [{#SMART.DEVPATH}] Status - Not updated'
+                  priority: WARNING
+                  dependencies:
+                    - name: 'Proxmox: Smart [{#SMART.DEVPATH}] Status - Not updated'
+                      expression: 'nodata(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],{$PROXMOX_NODATA02})=1'
+                - uuid: 5d6d53c9286d45609cae1579bfa41822
+                  expression: 'nodata(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],{$PROXMOX_NODATA02})=1'
+                  name: 'Proxmox: Smart [{#SMART.DEVPATH}] Status - Not updated'
+                  priority: AVERAGE
+                  dependencies:
+                    - name: 'Proxmox: Smart [{#SMART.DEVPATH}] Status - Not updated'
+                      expression: 'nodata(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],{$PROXMOX_NODATA03})=1'
+                - uuid: 7a6e6eac422f4335874ed91cff0f01f6
+                  expression: 'nodata(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],{$PROXMOX_NODATA03})=1'
+                  name: 'Proxmox: Smart [{#SMART.DEVPATH}] Status - Not updated'
+                  priority: HIGH
+                  dependencies:
+                    - name: 'Proxmox: Smart [{#SMART.DEVPATH}] Status - Not updated'
+                      expression: 'nodata(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],{$PROXMOX_NODATA04})=1'
+                - uuid: 2066fe39315c46f49b05a37f536093cd
+                  expression: 'nodata(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],{$PROXMOX_NODATA04})=1'
+                  name: 'Proxmox: Smart [{#SMART.DEVPATH}] Status - Not updated'
+                  priority: DISASTER
+                - uuid: 978c0211e3a34882826188a4a8183bcc
+                  expression: 'find(/0_CST_TPL-Proxmox Backup Server by HTTP - Disk check/proxmox.smart.status[{#SMART.DEVPATH}],,"regexp","unknown")=1'
+                  name: 'Proxmox: Smart [{#SMART.DEVPATH}] Status unknown'
+                  priority: WARNING
+            - uuid: 4b5f865bbe114f70a6612bfd752df291
+              name: 'Proxmox: Smart [{#SMART.DEVPATH}]: Used for'
+              type: DEPENDENT
+              key: 'proxmox.smart.usedfor[{#SMART.DEVPATH}]'
+              delay: '0'
+              trends: '0'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data[?(@.devpath == "{#SMART.DEVPATH}")].used.first()'
+              master_item:
+                key: proxmox.smart.data
+            - uuid: c66c1abc6cd84a889fdaa80fb98fe448
+              name: 'Proxmox: Smart [{#SMART.DEVPATH}]: Vendor'
+              type: DEPENDENT
+              key: 'proxmox.smart.vendor[{#SMART.DEVPATH}]'
+              delay: '0'
+              trends: '0'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.data[?(@.devpath == "{#SMART.DEVPATH}")].vendor.first()'
+              master_item:
+                key: proxmox.smart.data
+          master_item:
+            key: proxmox.smart.data
+          lld_macro_paths:
+            - lld_macro: '{#SMART.DEVPATH}'
+              path: $.devpath
+      macros:
+        - macro: '{$PBS.NODE.NAME}'
+          value: localhost
+          description: 'Internal node name of PBS for API. Not used as https host.'
+        - macro: '{$PBS.TOKEN.ID}'
+          value: USER@REALM!TOKENID
+          description: 'API tokens allow stateless access to most parts of the REST API by another system, software or API client.'
+        - macro: '{$PBS.TOKEN.SECRET}'
+          value: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+          description: 'Secret key.'
+        - macro: '{$PBS.URL.PORT}'
+          value: '8007'
+          description: 'The API uses the HTTPS protocol and the server listens to port 8007 by default.'
+        - macro: '{$PROXMOX.REQ.RETRY}'
+          value: '2'
+          description: 'Maximum retries for web requests'
+        - macro: '{$PROXMOX.REQ.RETRY.MS}'
+          value: '500'
+          description: 'Wait time in ms in retries'
+        - macro: '{$PROXMOX_NODATA01}'
+          value: 1d
+          description: 'User for "Not updated" triggers (Low)'
+        - macro: '{$PROXMOX_NODATA02}'
+          value: 2d
+          description: 'User for "Not updated" triggers (Mid)'
+        - macro: '{$PROXMOX_NODATA03}'
+          value: 3d
+          description: 'User for "Not updated" triggers (High)'
+        - macro: '{$PROXMOX_NODATA04}'
+          value: 4d
+          description: 'User for "Not updated" triggers (Disaster)'
